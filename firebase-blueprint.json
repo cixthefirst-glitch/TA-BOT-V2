@@ -1,0 +1,62 @@
+{
+  "collections": [
+    {
+      "name": "users",
+      "fields": [
+        {
+          "name": "telegram_id",
+          "type": "string"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp"
+        }
+      ]
+    },
+    {
+      "name": "signals",
+      "fields": [
+        {
+          "name": "pair",
+          "type": "string"
+        },
+        {
+          "name": "timeframe",
+          "type": "string"
+        },
+        {
+          "name": "type",
+          "type": "string"
+        },
+        {
+          "name": "entry",
+          "type": "number"
+        },
+        {
+          "name": "targets",
+          "type": "array"
+        },
+        {
+          "name": "stop_loss",
+          "type": "number"
+        },
+        {
+          "name": "note",
+          "type": "string"
+        },
+        {
+          "name": "status",
+          "type": "string"
+        },
+        {
+          "name": "created_at",
+          "type": "timestamp"
+        },
+        {
+          "name": "updated_at",
+          "type": "timestamp"
+        }
+      ]
+    }
+  ]
+}

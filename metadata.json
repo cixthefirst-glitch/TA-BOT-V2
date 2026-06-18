@@ -1,0 +1,8 @@
+{
+  "name": "Analysis Bot",
+  "description": "Automated crypto analysis and signal generator for MEXC Futures with aggressive pre-pump/pre-dump detection.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
