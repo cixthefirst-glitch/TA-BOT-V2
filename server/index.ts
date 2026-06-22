@@ -90,8 +90,13 @@ cron.schedule("0 */4 * * *", async () => { // Every 4 hours
   });
 
   app.get("/api/signals", async (req, res) => {
-    const signals = await getRecentSignals(50);
-    res.json(signals);
+    try {
+      const signals = await getRecentSignals(50);
+      res.json(signals || []);
+    } catch (error) {
+      console.error("Error fetching signals:", error);
+      res.status(500).json({ error: "Failed to fetch signals" });
+    }
   });
   
   app.get("/api/active-signals", async (req, res) => {
