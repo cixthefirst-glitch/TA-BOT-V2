@@ -31,53 +31,53 @@ export async function getAvailablePairs(): Promise<string[]> {
   }
 }
 
-export async function getMEXCKlines(symbol: string, interval: string): Promise<KlineInput[]> {
-  try {
-    // interval formats mapping suitable for MEXC Futures
-    // 1h = Min60, 4h = Min240, 1d = Day1
-    let intervalParam = 'Min60';
-    if (interval === '1h') intervalParam = 'Min60';
-    else if (interval === '4h') intervalParam = 'Min240';
-    else if (interval === '1d') intervalParam = 'Day1';
-    else if (interval === '15m') intervalParam = 'Min15';
+export async function getMEXCKlines(symbol: string, interval: string, retries = 3): Promise<KlineInput[]> {
+  for (let i = 0; i < retries; i++) {
+    try {
+      // interval formats mapping suitable for MEXC Futures
+      // 1h = Min60, 4h = Min240, 1d = Day1
+      let intervalParam = 'Min60';
+      if (interval === '1h') intervalParam = 'Min60';
+      else if (interval === '4h') intervalParam = 'Min240';
+      else if (interval === '1d') intervalParam = 'Day1';
+      else if (interval === '15m') intervalParam = 'Min15';
 
-    // In MEXC V1 contract API, endpoint is /api/v1/contract/kline/{symbol}
-    // query: ?interval=Min60&end=... or just no end to get latest
-    const res = await axios.get(MEXC_FUTURES_URL + "/" + symbol, {
-      params: {
-        interval: intervalParam
+      const res = await axios.get(MEXC_FUTURES_URL + "/" + symbol, {
+        params: {
+          interval: intervalParam
+        }
+      });
+
+      if (res.data && res.data.success && res.data.data) {
+        const data = res.data.data;
+        const timeArr = data.time || [];
+        const openArr = data.open || [];
+        const closeArr = data.close || [];
+        const highArr = data.high || [];
+        const lowArr = data.low || [];
+        const volArr = data.vol || [];
+
+        const klines: KlineInput[] = [];
+        for (let i = 0; i < timeArr.length; i++) {
+          klines.push({
+            time: timeArr[i] * 1000,
+            open: openArr[i],
+            high: highArr[i],
+            low: lowArr[i],
+            close: closeArr[i],
+            vol: volArr[i],
+          });
+        }
+        return klines;
       }
-    });
-
-    if (res.data && res.data.success && res.data.data) {
-      const data = res.data.data;
-      // Depending on actual response structure from POST / GET
-      // Usually it's arrays of [time, open, close, high, low, vol, ...]
-      // Wait, Mexc V1 contract kline usually returns {"success":true,"data":{"time":[...],"open":[...],"close":[...],"high":[...],"low":[...],"vol":[...]}}
-      
-      const timeArr = data.time || [];
-      const openArr = data.open || [];
-      const closeArr = data.close || [];
-      const highArr = data.high || [];
-      const lowArr = data.low || [];
-      const volArr = data.vol || [];
-
-      const klines: KlineInput[] = [];
-      for (let i = 0; i < timeArr.length; i++) {
-        klines.push({
-          time: timeArr[i] * 1000,
-          open: openArr[i],
-          high: highArr[i],
-          low: lowArr[i],
-          close: closeArr[i],
-          vol: volArr[i],
-        });
+      return [];
+    } catch (error: any) {
+      if (i === retries - 1) {
+        console.error(`Failed to fetch klines for ${symbol} ${interval} after ${retries} attempts.`);
+        return [];
       }
-      return klines;
+      await new Promise(r => setTimeout(r, 1000 * (i + 1))); // Backoff
     }
-    return [];
-  } catch (error) {
-    console.error("Failed to fetch klines for " + symbol + " " + interval);
-    return [];
   }
+  return [];
 }

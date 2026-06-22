@@ -1,4 +1,4 @@
-import { collection, doc, setDoc, getDocs, query, where, orderBy, limit as limitDocs, updateDoc, serverTimestamp, getDoc } from 'firebase/firestore';
+import { collection, doc, setDoc, getDocs, query, where, orderBy, limit as limitDocs, updateDoc, serverTimestamp, getDoc, deleteDoc, writeBatch } from 'firebase/firestore';
 import { db } from './firebase';
 
 export interface Signal {
@@ -12,8 +12,35 @@ export interface Signal {
   note?: string;
   status: 'OPEN' | 'TARGET_HIT' | 'STOP_HIT' | 'CLOSED';
   is_aggressive?: boolean;
+  strategyName?: string;
   created_at?: Date | any;
   updated_at?: Date | any;
+}
+
+export async function clearAllSignals(): Promise<boolean> {
+  try {
+    const signalsRef = collection(db, 'signals');
+    const snapshot = await getDocs(signalsRef);
+    console.log(`Found ${snapshot.size} signals to clear`);
+    if (snapshot.empty) return true;
+
+    const batch = writeBatch(db);
+    let count = 0;
+    for (const document of snapshot.docs) {
+      console.log(`Deleting signal doc ID: ${document.id}`);
+      batch.delete(document.ref);
+      count++;
+    }
+    console.log(`Prepared to delete ${count} signals in batch`);
+    if (count > 0) {
+      await batch.commit();
+      console.log('Batch commit successful');
+    }
+    return true;
+  } catch (error) {
+    console.error('Error clearing signals:', error);
+    return false;
+  }
 }
 
 export async function addUser(telegramId: string): Promise<boolean> {

@@ -6,7 +6,7 @@ import { getMEXCKlines, getAvailablePairs } from "./mexc";
 import { getMarketContext } from "./coingecko";
 import { analyzePair } from "./analyzer";
 import { broadcastMessage } from "./telegram";
-import { getActiveSignals, saveSignal, updateSignalStatus, getRecentSignals, get24hPerformance, Signal } from "./db";
+import { getActiveSignals, saveSignal, updateSignalStatus, getRecentSignals, get24hPerformance, Signal, clearAllSignals } from "./db";
 
 async function startServer() {
   try {
@@ -19,6 +19,74 @@ async function startServer() {
     console.log("Registering routes...");
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
+  });
+
+// Cache for latest backtests
+const backtestCache = new Map<string, any>();
+
+// Scheduled backtest for popular pairs
+cron.schedule("0 */4 * * *", async () => { // Every 4 hours
+  console.log("Running scheduled autonomous backtest...");
+  const pairs = ['BTC_USDT', 'ETH_USDT', 'SOL_USDT'];
+  const { runBacktestSuite } = await import('./backtest');
+  
+  for (const pair of pairs) {
+    try {
+      const marketContext = await getMarketContext();
+      const result = await runBacktestSuite(pair, '1h', ['conservative'], marketContext);
+      backtestCache.set(pair, result);
+      console.log(`Autonomous backtest for ${pair} complete.`);
+    } catch (e) {
+      console.error(`Autonomous backtest failed for ${pair}:`, e);
+    }
+  }
+});
+
+  app.get("/api/backtest-cache", async (req, res) => {
+    res.json(Object.fromEntries(backtestCache));
+  });
+
+  app.post("/api/backtest", async (req, res) => {
+    try {
+      const { pair, pairs, timeframe = '15m', strategies = ['conservative'] } = req.body;
+      let pairsToRun = pairs || [pair || 'BTC_USDT'];
+      
+      const { runBacktestSuite } = await import('./backtest');
+      
+      if (pairsToRun.length === 1 && pairsToRun[0] === 'AUTO') {
+        const { getAvailablePairs } = await import('./mexc');
+        const allPairs = await getAvailablePairs();
+        pairsToRun = allPairs.sort(() => 0.5 - Math.random()).slice(0, 10);
+      } else if (pairsToRun.length === 1 && pairsToRun[0].includes(',')) {
+        pairsToRun = pairsToRun[0].split(',').map((p: string) => p.trim()).filter(Boolean);
+      }
+
+      const marketContext = await getMarketContext();
+      const results = await Promise.all(pairsToRun.map(async (p) => {
+        const result = await runBacktestSuite(p, timeframe, strategies, marketContext);
+        return { p, result: Array.isArray(result) ? result : [] };
+      }));
+
+      const aggregated: Record<string, { wins: number, losses: number, totalTrades: number }> = {};
+      for (const { result } of results) {
+        for (const sRes of (result as any[])) {
+          if (!aggregated[sRes.strategyName]) aggregated[sRes.strategyName] = { wins: 0, losses: 0, totalTrades: 0 };
+          aggregated[sRes.strategyName].wins += (sRes.wins || 0);
+          aggregated[sRes.strategyName].losses += (sRes.losses || 0);
+          aggregated[sRes.strategyName].totalTrades += (sRes.totalTrades || 0);
+        }
+      }
+      const finalAggregated = Object.entries(aggregated).map(([name, data]) => ({
+        name,
+        ...data,
+        winRate: data.totalTrades > 0 ? ((data.wins / data.totalTrades) * 100).toFixed(1) + '%' : '0%'
+      }));
+
+      res.json({ results, aggregated: finalAggregated });
+    } catch (error: any) {
+      console.error('Backtest error:', error);
+      res.status(500).json({ error: error.message || 'Failed to run backtest' });
+    }
   });
 
   app.get("/api/signals", async (req, res) => {
@@ -34,6 +102,13 @@ async function startServer() {
   app.get("/api/performance", async (req, res) => {
     const stats = await get24hPerformance();
     res.json(stats);
+  });
+
+  app.post("/api/clear-signals", async (req, res) => {
+    console.log("Received request to clear signals");
+    const success = await clearAllSignals();
+    console.log("Clear signals result:", success);
+    res.json({ success });
   });
 
   // Scheduled tasks for the bot
@@ -58,7 +133,10 @@ async function startServer() {
               const klines = await getMEXCKlines(pair, tf);
               const result = analyzePair(pair.replace('_', '/'), tf, klines, marketContext);
               
-              if (!('status' in result) || result.status !== 'no valid signal') {
+              if ('status' in result && result.status === 'rejected') {
+                const rejResult = result as any;
+                console.log(`[Analytics] Signal rejected for ${pair} (${tf}): prob ${rejResult.probability}% / reason ${rejResult.reason_score}% - ${rejResult.reason || 'below threshold'}`);
+              } else if (!('status' in result) || result.status !== 'no valid signal') {
                 foundSignals++;
                 const signalResult = result as any;
                 
@@ -71,7 +149,7 @@ async function startServer() {
                     msg = `⚠️ PRE-DUMP ALERT ⚠️\nSHORT ${signalResult.pair} (${signalResult.timeframe})\nProbability: ≤ 60%\nEntry: ${signalResult.entry}\nSL: ${signalResult.stop_loss}\nTP: ${signalResult.targets.join(', ')}\nIndicators: ${signalResult.note}`;
                   }
                 } else {
-                  msg = `🎯 CONFIRMED SIGNAL 🎯\n${signalResult.signal_type.toUpperCase()} ${signalResult.pair} (${signalResult.timeframe})\nProbability: ≥ 70%\nEntry: ${signalResult.entry}\nSL: ${signalResult.stop_loss}\nTP: ${signalResult.targets.join(', ')}\nReason: ${signalResult.note}`;
+                  msg = `🎯 CONFIRMED SIGNAL 🎯\n${signalResult.signal_type.toUpperCase()} ${signalResult.pair} (${signalResult.timeframe})\nProbability: ${signalResult.probability}%\nReason Score: ${signalResult.reason_score}%\nEntry: ${signalResult.entry}\nSL: ${signalResult.stop_loss}\nTP: ${signalResult.targets.join(', ')}\nReason: ${signalResult.note}`;
                 }
                 
                 broadcastMessage(msg);
@@ -85,7 +163,8 @@ async function startServer() {
                   stop_loss: signalResult.stop_loss,
                   note: signalResult.note,
                   status: 'OPEN',
-                  is_aggressive: !!signalResult.is_aggressive
+                  is_aggressive: !!signalResult.is_aggressive,
+                  strategyName: 'conservative'
                 });
               }
             } catch (err) {
@@ -114,6 +193,12 @@ async function startServer() {
 
   // Scan for new signals every hour
   cron.schedule("0 * * * *", runScan);
+  
+  // Strategy optimization daily
+  cron.schedule("0 0 * * *", async () => {
+    const { runOptimization } = await import('./optimizer');
+    await runOptimization();
+  });
 
   // Check active signals to see if target or stop loss hit (every 5 mins)
   cron.schedule("*/5 * * * *", async () => {

@@ -16,7 +16,13 @@ export async function startTelegramBot() {
 
   while (isPolling) {
     try {
-      const res = await fetch(`https://api.telegram.org/bot${token}/getUpdates?offset=${lastUpdateId + 1}&timeout=30`);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 45000); // 45s timeout, slightly longer than poll timeout
+      
+      const res = await fetch(`https://api.telegram.org/bot${token}/getUpdates?offset=${lastUpdateId + 1}&timeout=30`, {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
       
       if (!res.ok) {
         throw new Error(`HTTP error! status: ${res.status}`);
@@ -43,37 +49,56 @@ export async function startTelegramBot() {
         }
       }
     } catch (e: any) {
-      if (e.name !== 'AbortError' && e.code !== 'UND_ERR_CONNECT_TIMEOUT') {
-        if (e.message && e.message.includes('409')) {
-          // 409 Conflict: another instance is polling, common during dev reloads.
-          // Fallback to silent retry.
-        } else {
-          console.error('Telegram polling error:', e.message);
-        }
+      // Specifically ignore common network failures for polling
+      const isFetchError = e.message && (e.message.includes('fetch failed') || e.message === 'fetch failed');
+      const isAbortError = e.name === 'AbortError' || e.code === 'UND_ERR_CONNECT_TIMEOUT' || e.name === 'TimeoutError';
+      const is409Error = e.message && e.message.includes('409');
+
+      if (!isFetchError && !isAbortError && !is409Error) {
+        console.error('Telegram polling error:', e.message);
       }
+      
       await new Promise(r => setTimeout(r, 5000));
     }
   }
 }
 
-export async function sendTelegramMessage(chatId: string, text: string) {
+export function escapeHTML(text: string): string {
+  return text.replace(/&/g, '&amp;')
+             .replace(/</g, '&lt;')
+             .replace(/>/g, '&gt;')
+             .replace(/"/g, '&quot;');
+}
+
+export async function sendTelegramMessage(chatId: string, text: string, retries = 3) {
   if (chatId.includes(':')) {
     console.warn(`⚠️ Skipped sending message to invalid chat ID (looks like a bot token): ${chatId}`);
     return;
   }
   
-  try {
-    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' })
-    });
-    if (!res.ok) {
+  const escapedText = escapeHTML(text);
+  
+  for (let i = 0; i < retries; i++) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+      
+      const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, text: escapedText, parse_mode: 'HTML' }),
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      
+      if (res.ok) return;
+
       const err = await res.text();
-      console.error("Failed to send message to " + chatId + ":", err);
+      console.error(`Failed to send message to ${chatId} (attempt ${i + 1}):`, err);
+    } catch(e: any) {
+      console.error(`Failed to send message to ${chatId} (attempt ${i + 1}):`, e.message);
     }
-  } catch(e: any) {
-    console.error("Failed to send message to " + chatId + ":", e.message);
+    await new Promise(r => setTimeout(r, 1000 * (i + 1))); // Backoff
   }
 }
 
