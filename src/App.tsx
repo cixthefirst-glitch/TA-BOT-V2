@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Activity, CheckCircle2, XCircle, Clock, Search, ExternalLink, ShieldAlert, LineChart, PlayCircle } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { PatternVisualizer } from './components/PatternVisualizer';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -19,6 +20,8 @@ interface Signal {
   status: 'OPEN' | 'TARGET_HIT' | 'STOP_HIT' | 'CLOSED';
   is_aggressive?: boolean;
   created_at: string;
+  pattern?: string;
+  market_structure?: string;
 }
 
 export default function App() {
@@ -29,10 +32,12 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [isScanning, setIsScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [expandedSignals, setExpandedSignals] = useState<number[]>([]);
 
   // Backtest state
   const [btPair, setBtPair] = useState('BTC_USDT');
   const [btTimeframe, setBtTimeframe] = useState('1h');
+  const [btMarketTrend, setBtMarketTrend] = useState('Neutral');
   const [selectedStrategies, setSelectedStrategies] = useState<string[]>(['conservative']);
   const [btRunning, setBtRunning] = useState(false);
   const [btResults, setBtResults] = useState<any>(null); // renamed from btResult to btResults
@@ -43,12 +48,12 @@ export default function App() {
     continuousLoopRef.current = isContinuousLoop;
   }, [isContinuousLoop]);
 
-  const runBacktest = async (pairs: string[], timeframe: string, strategies: string[]) => {
+  const runBacktest = async (pairs: string[], timeframe: string, strategies: string[], marketTrend: string) => {
     try {
       const res = await fetch('/api/backtest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pairs, timeframe, strategies })
+        body: JSON.stringify({ pairs, timeframe, strategies, marketTrend })
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
@@ -60,7 +65,7 @@ export default function App() {
       continuousLoopRef.current = false;
     } finally {
       if (continuousLoopRef.current) {
-        setTimeout(() => runBacktest(pairs, timeframe, strategies), 30000);
+        setTimeout(() => runBacktest(pairs, timeframe, strategies, marketTrend), 30000);
       } else {
         setBtRunning(false);
       }
@@ -319,60 +324,69 @@ export default function App() {
                         </tr>
                       ) : (
                         signals.map((sig) => (
-                          <tr key={sig.id} className="hover:bg-[rgba(255,255,255,0.02)] transition-colors">
-                            <td className="px-6 py-4">
-                              <div className="flex items-center gap-3">
-                                <span className="font-bold font-mono text-white text-base">{sig.pair}</span>
-                                <span className="text-[0.65rem] px-2 py-1 rounded border border-[#00f2ff]/20 bg-[rgba(20,24,33,0.8)] text-[#718096] uppercase font-mono">TF: {sig.timeframe}</span>
-                                {sig.is_aggressive && (
-                                  <span className="text-[0.6rem] px-2 py-0.5 rounded border border-[#ffb800]/40 bg-[#ffb800]/10 text-[#ffb800] uppercase font-mono tracking-tighter">Aggressive</span>
-                                )}
-                              </div>
-                              <div className="text-[0.75rem] text-[#ffb800] mt-2 max-w-[250px] truncate border-l-2 border-[#ffb800] pl-2 bg-[#ffb800]/10 py-1" title={sig.note}>
-                                {sig.note}
-                              </div>
-                            </td>
-                            <td className="px-6 py-4">
-                              <span className={cn(
-                                "px-2 py-1 flex items-center justify-center w-min rounded text-[0.65rem] font-bold uppercase tracking-wider font-mono border",
-                                sig.type === 'long' ? "bg-[#00ff8c]/10 text-[#00ff8c] border-[#00ff8c]/30" : "bg-[#ff2b56]/10 text-[#ff2b56] border-[#ff2b56]/30"
-                              )}>
-                                {sig.type}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 font-mono font-bold text-white">
-                              {sig.entry}
-                            </td>
-                            <td className="px-6 py-4 font-mono font-bold text-[#00ff8c]">
-                              {sig.targets.join(', ')}
-                            </td>
-                            <td className="px-6 py-4 font-mono font-bold text-[#ff2b56]">
-                              {sig.stop_loss}
-                            </td>
-                            <td className="px-6 py-4">
-                              <div className="flex items-center gap-2">
-                                {getStatusIcon(sig.status)}
+                          <React.Fragment key={sig.id}>
+                            <tr onClick={() => setExpandedSignals(prev => prev.includes(sig.id) ? prev.filter(id => id !== sig.id) : [...prev, sig.id])} className="cursor-pointer hover:bg-[rgba(255,255,255,0.02)] transition-colors">
+                              <td className="px-6 py-4">
+                                <div className="flex items-center gap-3">
+                                  <span className="font-bold font-mono text-white text-base">{sig.pair}</span>
+                                  <span className="text-[0.65rem] px-2 py-1 rounded border border-[#00f2ff]/20 bg-[rgba(20,24,33,0.8)] text-[#718096] uppercase font-mono">TF: {sig.timeframe}</span>
+                                  {sig.is_aggressive && (
+                                    <span className="text-[0.6rem] px-2 py-0.5 rounded border border-[#ffb800]/40 bg-[#ffb800]/10 text-[#ffb800] uppercase font-mono tracking-tighter">Aggressive</span>
+                                  )}
+                                </div>
+                                <div className="text-[0.75rem] text-[#ffb800] mt-2 max-w-[250px] truncate border-l-2 border-[#ffb800] pl-2 bg-[#ffb800]/10 py-1" title={sig.note}>
+                                  {sig.note}
+                                </div>
+                              </td>
+                              <td className="px-6 py-4">
                                 <span className={cn(
-                                  "font-mono text-xs font-bold uppercase tracking-wider",
-                                  sig.status === 'OPEN' && 'text-[#00f2ff]',
-                                  sig.status === 'TARGET_HIT' && 'text-[#00ff8c]',
-                                  sig.status === 'STOP_HIT' && 'text-[#ff2b56]',
-                                  sig.status === 'CLOSED' && 'text-[#718096]'
-                                )}>{getStatusText(sig.status)}</span>
-                              </div>
-                              <div className="text-[0.65rem] text-[#718096] font-mono mt-2 uppercase tracking-tighter">
-                                {(() => {
-                                  const dateStr = sig.created_at.includes(' ') ? sig.created_at.replace(' ', 'T') + 'Z' : sig.created_at;
-                                  return new Date(dateStr).toLocaleString(undefined, {
-                                    month: 'short',
-                                    day: 'numeric',
-                                    hour: '2-digit',
-                                    minute: '2-digit'
-                                  });
-                                })()}
-                              </div>
-                            </td>
-                          </tr>
+                                  "px-2 py-1 flex items-center justify-center w-min rounded text-[0.65rem] font-bold uppercase tracking-wider font-mono border",
+                                  sig.type === 'long' ? "bg-[#00ff8c]/10 text-[#00ff8c] border-[#00ff8c]/30" : "bg-[#ff2b56]/10 text-[#ff2b56] border-[#ff2b56]/30"
+                                )}>
+                                  {sig.type}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 font-mono font-bold text-white">
+                                {sig.entry}
+                              </td>
+                              <td className="px-6 py-4 font-mono font-bold text-[#00ff8c]">
+                                {sig.targets.join(', ')}
+                              </td>
+                              <td className="px-6 py-4 font-mono font-bold text-[#ff2b56]">
+                                {sig.stop_loss}
+                              </td>
+                              <td className="px-6 py-4">
+                                <div className="flex items-center gap-2">
+                                  {getStatusIcon(sig.status)}
+                                  <span className={cn(
+                                    "font-mono text-xs font-bold uppercase tracking-wider",
+                                    sig.status === 'OPEN' && 'text-[#00f2ff]',
+                                    sig.status === 'TARGET_HIT' && 'text-[#00ff8c]',
+                                    sig.status === 'STOP_HIT' && 'text-[#ff2b56]',
+                                    sig.status === 'CLOSED' && 'text-[#718096]'
+                                  )}>{getStatusText(sig.status)}</span>
+                                </div>
+                                <div className="text-[0.65rem] text-[#718096] font-mono mt-2 uppercase tracking-tighter">
+                                  {(() => {
+                                    const dateStr = sig.created_at.includes(' ') ? sig.created_at.replace(' ', 'T') + 'Z' : sig.created_at;
+                                    return new Date(dateStr).toLocaleString(undefined, {
+                                      month: 'short',
+                                      day: 'numeric',
+                                      hour: '2-digit',
+                                      minute: '2-digit'
+                                    });
+                                  })()}
+                                </div>
+                              </td>
+                            </tr>
+                            {expandedSignals.includes(sig.id) && (
+                              <tr>
+                                <td colSpan={6} className="p-4 bg-[rgba(20,24,33,0.3)]">
+                                  <PatternVisualizer pattern={sig.pattern} marketStructure={sig.market_structure} />
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
                         ))
                       )}
                     </tbody>
@@ -400,13 +414,25 @@ export default function App() {
                     <option value="4h">4h</option>
                   </select>
                 </div>
+                <div className="flex-1 space-y-2">
+                  <label className="text-xs font-mono uppercase tracking-widest text-[#718096]">Market Trend</label>
+                  <select
+                    value={btMarketTrend}
+                    onChange={(e) => setBtMarketTrend(e.target.value)}
+                    className="w-full bg-[#050608] border border-[#00f2ff]/20 rounded px-4 py-2 text-white font-mono uppercase focus:outline-none focus:border-[#00f2ff]/50"
+                  >
+                    <option value="Neutral">Neutral</option>
+                    <option value="Bullish">Bullish</option>
+                    <option value="Bearish">Bearish</option>
+                  </select>
+                </div>
                 <div className="flex gap-2">
                   <button
                     onClick={async () => {
                       if (btRunning || selectedStrategies.length === 0) return;
                       setBtRunning(true);
                       setBtResults(null);
-                      await runBacktest(['AUTO'], btTimeframe, selectedStrategies);
+                      await runBacktest(['AUTO'], btTimeframe, selectedStrategies, btMarketTrend);
                     }}
                     className={cn("px-6 py-2 h-[42px] bg-[#ff2b56]/10 border border-[#ff2b56]/30 hover:bg-[#ff2b56]/20 rounded flex items-center gap-2 transition-colors uppercase tracking-widest font-mono text-sm text-[#ff2b56]", btRunning && "opacity-50 cursor-not-allowed")}
                   >

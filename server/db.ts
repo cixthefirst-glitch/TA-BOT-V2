@@ -15,6 +15,8 @@ export interface Signal {
   strategyName?: string;
   created_at?: Date | any;
   updated_at?: Date | any;
+  pattern?: string;
+  market_structure?: string;
 }
 
 export async function clearAllSignals(): Promise<boolean> {

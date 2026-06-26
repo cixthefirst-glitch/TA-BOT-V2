@@ -48,7 +48,7 @@ cron.schedule("0 */4 * * *", async () => { // Every 4 hours
 
   app.post("/api/backtest", async (req, res) => {
     try {
-      const { pair, pairs, timeframe = '15m', strategies = ['conservative'] } = req.body;
+      const { pair, pairs, timeframe = '15m', strategies = ['conservative'], marketTrend } = req.body;
       let pairsToRun = pairs || [pair || 'BTC_USDT'];
       
       const { runBacktestSuite } = await import('./backtest');
@@ -61,7 +61,7 @@ cron.schedule("0 */4 * * *", async () => { // Every 4 hours
         pairsToRun = pairsToRun[0].split(',').map((p: string) => p.trim()).filter(Boolean);
       }
 
-      const marketContext = await getMarketContext();
+      const marketContext = (marketTrend && marketTrend !== 'Neutral') ? marketTrend.toLowerCase() : await getMarketContext();
       const results = await Promise.all(pairsToRun.map(async (p) => {
         const result = await runBacktestSuite(p, timeframe, strategies, marketContext);
         return { p, result: Array.isArray(result) ? result : [] };
@@ -136,7 +136,7 @@ cron.schedule("0 */4 * * *", async () => { // Every 4 hours
           for (const tf of TIMEFRAMES) {
             try {
               const klines = await getMEXCKlines(pair, tf);
-              const result = analyzePair(pair.replace('_', '/'), tf, klines, marketContext);
+              const result = await analyzePair(pair.replace('_', '/'), tf, klines, marketContext);
               
               if ('status' in result && result.status === 'rejected') {
                 const rejResult = result as any;
@@ -169,7 +169,9 @@ cron.schedule("0 */4 * * *", async () => { // Every 4 hours
                   note: signalResult.note,
                   status: 'OPEN',
                   is_aggressive: !!signalResult.is_aggressive,
-                  strategyName: 'conservative'
+                  strategyName: 'conservative',
+                  pattern: signalResult.pattern,
+                  market_structure: signalResult.market_structure
                 });
               }
             } catch (err) {

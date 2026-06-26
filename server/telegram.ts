@@ -9,6 +9,8 @@ const token = process.env.TELEGRAM_BOT_TOKEN || '8814109715:AAF8cd7VTxbrZwz5j7GQ
 let isPolling = false;
 let lastUpdateId = 0;
 
+export const PERSONAL_CHAT_ID = process.env.USER_PERSONAL_CHAT_ID || '8184244632';
+
 export async function startTelegramBot() {
   if (isPolling) return;
   isPolling = true;
@@ -38,11 +40,11 @@ export async function startTelegramBot() {
             const text = update.message.text;
             const chatId = update.message.chat.id.toString();
             
+            await addUser(chatId);
+            
             if (text.startsWith('/start')) {
-              await addUser(chatId);
               await sendTelegramMessage(chatId, 'Welcome! You are now subscribed to Technical Analysis Crypto Signals.');
-            }
-            if (text.startsWith('/ping')) {
+            } else if (text.startsWith('/ping')) {
               await sendTelegramMessage(chatId, 'Pong! The bot is active.');
             }
           }
@@ -111,13 +113,22 @@ export async function broadcastMessage(message: string) {
     return;
   }
 
+  const broadcastPromises = [];
+
   if (channelId) {
-    sendTelegramMessage(channelId, message);
+    broadcastPromises.push(sendTelegramMessage(channelId, message));
   }
 
   users.forEach((userId) => {
-    sendTelegramMessage(userId, message);
+    broadcastPromises.push(sendTelegramMessage(userId, message));
   });
+
+  try {
+    await Promise.all(broadcastPromises);
+    console.log(`Successfully broadcasted message to ${broadcastPromises.length} recipients.`);
+  } catch (error) {
+    console.error('Error broadcasting message:', error);
+  }
 }
 
 // Start polling in the background without blocking
