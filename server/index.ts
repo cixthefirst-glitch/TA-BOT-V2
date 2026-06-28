@@ -6,7 +6,7 @@ import { getMEXCKlines, getAvailablePairs } from "./mexc";
 import { getMarketContext } from "./coingecko";
 import { analyzePair } from "./analyzer";
 import { broadcastMessage } from "./telegram";
-import { getActiveSignals, saveSignal, updateSignalStatus, getRecentSignals, get24hPerformance, Signal, clearAllSignals } from "./db";
+import { getActiveSignals, saveSignal, updateSignalStatus, getRecentSignals, get24hPerformance, Signal, clearAllSignals, deleteSignal } from "./db";
 
 async function startServer() {
   try {
@@ -16,105 +16,110 @@ async function startServer() {
 
     app.use(express.json());
 
-    console.log("Registering routes...");
-  app.get("/api/health", (req, res) => {
-    res.json({ status: "ok" });
-  });
+    // API Routes
+    app.get("/api/health", (req, res) => {
+      console.log("Health route hit");
+      res.json({ status: "ok" });
+    });
+    console.log("Health route registered");
 
-// Cache for latest backtests
-const backtestCache = new Map<string, any>();
+    // Cache for latest backtests
+    const backtestCache = new Map<string, any>();
 
-// Scheduled backtest for popular pairs
-cron.schedule("0 */4 * * *", async () => { // Every 4 hours
-  console.log("Running scheduled autonomous backtest...");
-  const pairs = ['BTC_USDT', 'ETH_USDT', 'SOL_USDT'];
-  const { runBacktestSuite } = await import('./backtest');
-  
-  for (const pair of pairs) {
-    try {
-      const marketContext = await getMarketContext();
-      const result = await runBacktestSuite(pair, '1h', ['conservative'], marketContext);
-      backtestCache.set(pair, result);
-      console.log(`Autonomous backtest for ${pair} complete.`);
-    } catch (e) {
-      console.error(`Autonomous backtest failed for ${pair}:`, e);
-    }
-  }
-});
-
-  app.get("/api/backtest-cache", async (req, res) => {
-    res.json(Object.fromEntries(backtestCache));
-  });
-
-  app.post("/api/backtest", async (req, res) => {
-    try {
-      const { pair, pairs, timeframe = '15m', strategies = ['conservative'], marketTrend } = req.body;
-      let pairsToRun = pairs || [pair || 'BTC_USDT'];
-      
+    // Scheduled backtest for popular pairs
+    cron.schedule("0 */4 * * *", async () => { // Every 4 hours
+      console.log("Running scheduled autonomous backtest...");
+      const pairs = ['BTC_USDT', 'ETH_USDT', 'SOL_USDT'];
       const { runBacktestSuite } = await import('./backtest');
       
-      if (pairsToRun.length === 1 && pairsToRun[0] === 'AUTO') {
-        const { getAvailablePairs } = await import('./mexc');
-        const allPairs = await getAvailablePairs();
-        pairsToRun = allPairs.sort(() => 0.5 - Math.random()).slice(0, 10);
-      } else if (pairsToRun.length === 1 && pairsToRun[0].includes(',')) {
-        pairsToRun = pairsToRun[0].split(',').map((p: string) => p.trim()).filter(Boolean);
-      }
-
-      const marketContext = (marketTrend && marketTrend !== 'Neutral') ? marketTrend.toLowerCase() : await getMarketContext();
-      const results = await Promise.all(pairsToRun.map(async (p) => {
-        const result = await runBacktestSuite(p, timeframe, strategies, marketContext);
-        return { p, result: Array.isArray(result) ? result : [] };
-      }));
-
-      const aggregated: Record<string, { wins: number, losses: number, totalTrades: number }> = {};
-      for (const { result } of results) {
-        for (const sRes of (result as any[])) {
-          if (!aggregated[sRes.strategyName]) aggregated[sRes.strategyName] = { wins: 0, losses: 0, totalTrades: 0 };
-          aggregated[sRes.strategyName].wins += (sRes.wins || 0);
-          aggregated[sRes.strategyName].losses += (sRes.losses || 0);
-          aggregated[sRes.strategyName].totalTrades += (sRes.totalTrades || 0);
+      for (const pair of pairs) {
+        try {
+          const marketContext = await getMarketContext();
+          const result = await runBacktestSuite(pair, '1h', ['conservative'], marketContext);
+          backtestCache.set(pair, result);
+          console.log(`Autonomous backtest for ${pair} complete.`);
+        } catch (e) {
+          console.error(`Autonomous backtest failed for ${pair}:`, e);
         }
       }
-      const finalAggregated = Object.entries(aggregated).map(([name, data]) => ({
-        name,
-        ...data,
-        winRate: data.totalTrades > 0 ? ((data.wins / data.totalTrades) * 100).toFixed(1) + '%' : '0%'
-      }));
+    });
 
-      res.json({ results, aggregated: finalAggregated });
-    } catch (error: any) {
-      console.error('Backtest error:', error);
-      res.status(500).json({ error: error.message || 'Failed to run backtest' });
-    }
-  });
+    app.get("/api/backtest-cache", async (req, res) => {
+      res.json(Object.fromEntries(backtestCache));
+    });
 
-  app.get("/api/signals", async (req, res) => {
-    try {
-      const signals = await getRecentSignals(50);
-      res.json(signals || []);
-    } catch (error) {
-      console.error("Error fetching signals:", error);
-      res.status(500).json({ error: "Failed to fetch signals" });
-    }
-  });
-  
-  app.get("/api/active-signals", async (req, res) => {
-    const active = await getActiveSignals();
-    res.json(active);
-  });
+    app.post("/api/backtest", async (req, res) => {
+      try {
+        const { pair, pairs, timeframe = '15m', strategies = ['conservative'], marketTrend } = req.body;
+        let pairsToRun = pairs || [pair || 'BTC_USDT'];
+        
+        const { runBacktestSuite } = await import('./backtest');
+        
+        if (pairsToRun.length === 1 && pairsToRun[0] === 'AUTO') {
+          const { getAvailablePairs } = await import('./mexc');
+          const allPairs = await getAvailablePairs();
+          pairsToRun = allPairs.sort(() => 0.5 - Math.random()).slice(0, 10);
+        } else if (pairsToRun.length === 1 && pairsToRun[0].includes(',')) {
+          pairsToRun = pairsToRun[0].split(',').map((p: string) => p.trim()).filter(Boolean);
+        }
 
-  app.get("/api/performance", async (req, res) => {
-    const stats = await get24hPerformance();
-    res.json(stats);
-  });
+        const marketContext = (marketTrend && marketTrend !== 'Neutral') ? marketTrend.toLowerCase() : await getMarketContext();
+        const results = await Promise.all(pairsToRun.map(async (p) => {
+          const result = await runBacktestSuite(p, timeframe, strategies, marketContext);
+          return { p, result: Array.isArray(result) ? result : [] };
+        }));
 
-  app.post("/api/clear-signals", async (req, res) => {
-    console.log("Received request to clear signals");
-    const success = await clearAllSignals();
-    console.log("Clear signals result:", success);
-    res.json({ success });
-  });
+        const aggregated: Record<string, { wins: number, losses: number, totalTrades: number }> = {};
+        for (const { result } of results) {
+          for (const sRes of (result as any[])) {
+            if (!aggregated[sRes.strategyName]) aggregated[sRes.strategyName] = { wins: 0, losses: 0, totalTrades: 0 };
+            aggregated[sRes.strategyName].wins += (sRes.wins || 0);
+            aggregated[sRes.strategyName].losses += (sRes.losses || 0);
+            aggregated[sRes.strategyName].totalTrades += (sRes.totalTrades || 0);
+          }
+        }
+        const finalAggregated = Object.entries(aggregated).map(([name, data]) => ({
+          name,
+          ...data,
+          winRate: data.totalTrades > 0 ? ((data.wins / data.totalTrades) * 100).toFixed(1) + '%' : '0%'
+        }));
+
+        res.json({ results, aggregated: finalAggregated });
+      } catch (error: any) {
+        console.error('Backtest error:', error);
+        res.status(500).json({ error: error.message || 'Failed to run backtest' });
+      }
+    });
+
+    app.get("/api/signals", async (req, res) => {
+      console.log("!!! /api/signals route reached !!!");
+      try {
+        const signals = await getRecentSignals(50);
+        res.json(signals || []);
+      } catch (error) {
+        console.error("Error fetching signals:", error);
+        res.status(500).json({ error: "Failed to fetch signals" });
+      }
+    });
+    
+    app.get("/api/active-signals", async (req, res) => {
+      const active = await getActiveSignals();
+      res.json(active);
+    });
+
+    app.get("/api/performance", async (req, res) => {
+      const stats = await get24hPerformance();
+      res.json(stats);
+    });
+
+    app.post("/api/clear-signals", async (req, res) => {
+      console.log("Received request to clear signals");
+      const success = await clearAllSignals();
+      console.log("Clear signals result:", success);
+      res.json({ success });
+    });
+
+    // ... other routes ...
 
   // Scheduled tasks for the bot
   const TIMEFRAMES = ["1h", "4h", "1d"];
@@ -145,16 +150,24 @@ cron.schedule("0 */4 * * *", async () => { // Every 4 hours
                 foundSignals++;
                 const signalResult = result as any;
                 
-                // Format nice message
+                // Format nice message (more casual)
                 let msg = '';
                 if (signalResult.is_aggressive) {
-                  if (signalResult.signal_type === 'long') {
-                    msg = `🚀 PRE-PUMP ALERT 🚀\nLONG ${signalResult.pair} (${signalResult.timeframe})\nProbability: ≤ 60%\nEntry: ${signalResult.entry}\nSL: ${signalResult.stop_loss}\nTP: ${signalResult.targets.join(', ')}\nIndicators: ${signalResult.note}`;
-                  } else {
-                    msg = `⚠️ PRE-DUMP ALERT ⚠️\nSHORT ${signalResult.pair} (${signalResult.timeframe})\nProbability: ≤ 60%\nEntry: ${signalResult.entry}\nSL: ${signalResult.stop_loss}\nTP: ${signalResult.targets.join(', ')}\nIndicators: ${signalResult.note}`;
-                  }
+                  const icon = signalResult.signal_type === 'long' ? '🚀' : '⚠️';
+                  msg = `${icon} ${signalResult.signal_type === 'long' ? 'PRE-PUMP' : 'PRE-DUMP'} ALERT 
+${signalResult.signal_type.toUpperCase()} ${signalResult.pair} (${signalResult.timeframe})
+Prob: ~${signalResult.probability}%
+Entry: ${signalResult.entry}
+SL: ${signalResult.stop_loss}
+TP: ${signalResult.targets.join(', ')}
+Context: ${signalResult.note}`;
                 } else {
-                  msg = `🎯 CONFIRMED SIGNAL 🎯\n${signalResult.signal_type.toUpperCase()} ${signalResult.pair} (${signalResult.timeframe})\nProbability: ${signalResult.probability}%\nReason Score: ${signalResult.reason_score}%\nEntry: ${signalResult.entry}\nSL: ${signalResult.stop_loss}\nTP: ${signalResult.targets.join(', ')}\nReason: ${signalResult.note}`;
+                  msg = `🎯 SIGNAL: ${signalResult.signal_type.toUpperCase()} ${signalResult.pair} (${signalResult.timeframe})
+Prob: ${signalResult.probability}% | Reason Score: ${signalResult.reason_score}%
+Entry: ${signalResult.entry}
+Targets: ${signalResult.targets.join(', ')}
+SL: ${signalResult.stop_loss}
+Note: ${signalResult.note}`;
                 }
                 
                 broadcastMessage(msg);
@@ -198,8 +211,18 @@ cron.schedule("0 */4 * * *", async () => { // Every 4 hours
     res.json(result);
   });
 
-  // Scan for new signals every hour
-  cron.schedule("0 * * * *", runScan);
+  app.post("/api/signals/clear", async (req, res) => {
+    const success = await clearAllSignals();
+    res.json({ success });
+  });
+
+  app.post("/api/signals/clear-recent", async (req, res) => {
+    const success = await clearRecentSignals();
+    res.json({ success });
+  });
+
+  // Scan for new signals every minute
+  cron.schedule("* * * * *", runScan);
   
   // Strategy optimization daily
   cron.schedule("0 0 * * *", async () => {
@@ -243,16 +266,22 @@ cron.schedule("0 */4 * * *", async () => { // Every 4 hours
         }
 
         if (hitStatus) {
-          await updateSignalStatus(sig.id!, hitStatus);
+          await deleteSignal(sig.id!);
           const msg = hitStatus === 'TARGET_HIT' 
-            ? `✅ Target Hit: ${sig.pair} reached ${hitVal} (${sig.timeframe} ${sig.type.toUpperCase()})`
-            : `❌ Stop Loss Hit: ${sig.pair} stopped at ${hitVal} (${sig.timeframe} ${sig.type.toUpperCase()})`;
+            ? `✅ Profit! ${sig.pair} hit ${hitVal} (${sig.timeframe} ${sig.type.toUpperCase()})`
+            : `❌ Closed: ${sig.pair} hit stop loss at ${hitVal} (${sig.timeframe} ${sig.type.toUpperCase()})`;
           broadcastMessage(msg);
         }
       }
     } catch(e) {
       console.error("Error in check loop:", e);
     }
+  });
+
+  // Clear all signals every 24 hours
+  cron.schedule("0 0 * * *", async () => {
+    console.log("Running scheduled 24h signal cleanup...");
+    await clearAllSignals();
   });
 
   // Vite middleware for development
@@ -276,6 +305,7 @@ cron.schedule("0 */4 * * *", async () => { // Every 4 hours
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
+  
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server successfully listening on 0.0.0.0:${PORT}`);

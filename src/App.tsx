@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Activity, CheckCircle2, XCircle, Clock, Search, ExternalLink, ShieldAlert, LineChart, PlayCircle } from 'lucide-react';
+import { Activity, CheckCircle2, XCircle, Clock, Search, ExternalLink, ShieldAlert, LineChart, PlayCircle, Trash2 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { PatternVisualizer } from './components/PatternVisualizer';
@@ -113,8 +113,8 @@ export default function App() {
       const allData = await allRes.json();
       const activeData = await activeRes.json();
       const perfData = await perfRes.json();
-      setSignals(allData);
-      setActiveSignals(activeData);
+      setSignals(Array.isArray(allData) ? allData : []);
+      setActiveSignals(Array.isArray(activeData) ? activeData : []);
       setPerformance(perfData);
       setError(null);
     } catch (error: any) {
@@ -209,6 +209,27 @@ export default function App() {
               >
                 <Search className={cn("w-3 h-3 text-[#00f2ff]", isScanning && "animate-spin")} />
                 <span className="text-xs font-mono tracking-widest text-[#e0e6ed] uppercase">{isScanning ? "Scanning..." : "Force Scan"}</span>
+              </button>
+              <button
+                onClick={async () => {
+                  if (!confirm('Are you sure you want to clear recent signals (last 24h)?')) return;
+                  try {
+                    const res = await fetch('/api/signals/clear-recent', { method: 'POST' });
+                    const data = await res.json();
+                    if (data.success) {
+                      fetchData();
+                      alert('Recent signals cleared.');
+                    } else {
+                      alert('Failed to clear recent signals.');
+                    }
+                  } catch (err) {
+                    alert('Error clearing recent signals.');
+                  }
+                }}
+                className={cn("px-4 py-2 bg-[rgba(20,24,33,0.7)] border border-white/20 hover:border-[#ff2b56]/50 rounded flex items-center gap-2 cursor-pointer transition-colors")}
+              >
+                <Trash2 className="w-3 h-3 text-[#ff2b56]" />
+                <span className="text-xs font-mono tracking-widest text-[#ff2b56] uppercase">Clear Recent</span>
               </button>
               <div className="px-4 py-2 bg-[rgba(20,24,33,0.7)] border border-[#00f2ff]/15 rounded flex items-center gap-3">
                 <div className="w-2 h-2 rounded-full bg-[#00ff8c] shadow-[0_0_5px_#00ff8c] animate-pulse" />

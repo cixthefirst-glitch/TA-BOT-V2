@@ -26,21 +26,63 @@ export async function clearAllSignals(): Promise<boolean> {
     console.log(`Found ${snapshot.size} signals to clear`);
     if (snapshot.empty) return true;
 
-    const batch = writeBatch(db);
-    let count = 0;
-    for (const document of snapshot.docs) {
-      console.log(`Deleting signal doc ID: ${document.id}`);
-      batch.delete(document.ref);
-      count++;
-    }
-    console.log(`Prepared to delete ${count} signals in batch`);
-    if (count > 0) {
+    const docs = snapshot.docs;
+    const BATCH_SIZE = 500;
+    
+    for (let i = 0; i < docs.length; i += BATCH_SIZE) {
+      const batch = writeBatch(db);
+      const chunk = docs.slice(i, i + BATCH_SIZE);
+      
+      for (const document of chunk) {
+        batch.delete(document.ref);
+      }
+      
       await batch.commit();
-      console.log('Batch commit successful');
+      console.log(`Batch commit successful for ${chunk.length} docs`);
     }
+    
     return true;
   } catch (error) {
     console.error('Error clearing signals:', error);
+    return false;
+  }
+}
+
+export async function clearRecentSignals(hours: number = 24): Promise<boolean> {
+  try {
+    const signalsRef = collection(db, 'signals');
+    const timeLimit = new Date();
+    timeLimit.setHours(timeLimit.getHours() - hours);
+    
+    // We fetch all signals to filter in memory if composite index is not set
+    const snapshot = await getDocs(signalsRef);
+    
+    const docsToDelete = snapshot.docs.filter(doc => {
+      const data = doc.data();
+      const createdAt = data.created_at?.toDate?.() || new Date(0);
+      return createdAt >= timeLimit;
+    });
+
+    console.log(`Found ${docsToDelete.length} recent signals to clear`);
+    if (docsToDelete.length === 0) return true;
+
+    const BATCH_SIZE = 500;
+    
+    for (let i = 0; i < docsToDelete.length; i += BATCH_SIZE) {
+      const batch = writeBatch(db);
+      const chunk = docsToDelete.slice(i, i + BATCH_SIZE);
+      
+      for (const document of chunk) {
+        batch.delete(document.ref);
+      }
+      
+      await batch.commit();
+      console.log(`Batch commit successful for ${chunk.length} recent signal docs`);
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('Error clearing recent signals:', error);
     return false;
   }
 }
@@ -119,6 +161,17 @@ export async function updateSignalStatus(id: string, status: 'TARGET_HIT' | 'STO
     return true;
   } catch (error) {
     console.error('Error updating signal status:', error);
+    return false;
+  }
+}
+
+export async function deleteSignal(id: string): Promise<boolean> {
+  try {
+    const docRef = doc(db, 'signals', id);
+    await deleteDoc(docRef);
+    return true;
+  } catch (error) {
+    console.error('Error deleting signal:', error);
     return false;
   }
 }
